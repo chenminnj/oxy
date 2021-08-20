@@ -3,6 +3,7 @@ package roundrobin
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"net/url"
 	"sync"
@@ -122,7 +123,7 @@ func (r *RoundRobin) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !stuck {
-		url, err := r.NextServer()
+		url, err := r.NextServer(req.RemoteAddr)
 		if err != nil {
 			r.errHandler.ServeHTTP(w, req, err)
 			return
@@ -148,12 +149,32 @@ func (r *RoundRobin) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // NextServer gets the next server
-func (r *RoundRobin) NextServer() (*url.URL, error) {
-	srv, err := r.nextServer()
+func (r *RoundRobin) NextServer(addr string) (*url.URL, error) {
+	//srv, err := r.nextServer()
+	srv, err := r.nextServerHash(addr)
 	if err != nil {
 		return nil, err
 	}
 	return utils.CopyURL(srv.url), nil
+}
+
+func hash(s string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return h.Sum32()
+}
+
+func (r *RoundRobin) nextServerHash(addr string) (*server, error) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if len(r.servers) == 0 {
+		return nil, fmt.Errorf("no servers in the pool")
+	}
+
+	idx := int(hash(addr) ) % len(r.servers)
+	log.Debugf("blue chen: chenminnj/oxy/roundrobin/rr.go: find backend server: %s",r.servers[idx].url)
+	return r.servers[idx], nil
 }
 
 func (r *RoundRobin) nextServer() (*server, error) {
@@ -347,6 +368,6 @@ type balancerHandler interface {
 	ServerWeight(u *url.URL) (int, bool)
 	RemoveServer(u *url.URL) error
 	UpsertServer(u *url.URL, options ...ServerOption) error
-	NextServer() (*url.URL, error)
+	NextServer(addr string) (*url.URL, error)
 	Next() http.Handler
 }

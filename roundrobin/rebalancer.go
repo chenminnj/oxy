@@ -190,7 +190,7 @@ func (rb *Rebalancer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !stuck {
-		fwdURL, err := rb.next.NextServer()
+		fwdURL, err := rb.next.NextServer(req.RemoteAddr)
 		if err != nil {
 			rb.errHandler.ServeHTTP(w, req, err)
 			return
