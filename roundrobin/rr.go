@@ -4,12 +4,14 @@ package roundrobin
 import (
 	"fmt"
 	"hash/fnv"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vulcand/oxy/utils"
+	"strings"
 )
 
 // Weight is an optional functional argument that sets weight of the server
@@ -123,7 +125,7 @@ func (r *RoundRobin) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !stuck {
-		url, err := r.NextServer(req.RemoteAddr)
+		url, err := r.NextServer(req)
 		if err != nil {
 			r.errHandler.ServeHTTP(w, req, err)
 			return
@@ -149,9 +151,9 @@ func (r *RoundRobin) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 // NextServer gets the next server
-func (r *RoundRobin) NextServer(addr string) (*url.URL, error) {
+func (r *RoundRobin) NextServer(req *http.Request) (*url.URL, error) {
 	//srv, err := r.nextServer()
-	srv, err := r.nextServerHash(addr)
+	srv, err := r.nextServerHash(req)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +166,14 @@ func hash(s string) uint32 {
 	return h.Sum32()
 }
 
-func (r *RoundRobin) nextServerHash(addr string) (*server, error) {
+func (r *RoundRobin) nextServerHash(req *http.Request) (*server, error) {
+	var ip string
+	log.Debugf("Request Header is %v",req.Header)
+	ip = req.Header.Get("X-Real-Ip")
+	if ip == "" {
+		ip, _, _ = net.SplitHostPort(strings.TrimSpace(req.RemoteAddr))
+	}
+
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -172,8 +181,8 @@ func (r *RoundRobin) nextServerHash(addr string) (*server, error) {
 		return nil, fmt.Errorf("no servers in the pool")
 	}
 
-	idx := int(hash(addr) ) % len(r.servers)
-	log.Debugf("blue chen: chenminnj/oxy/roundrobin/rr.go: find backend server: %s",r.servers[idx].url)
+	idx := int(hash(ip) ) % len(r.servers)
+	log.Debugf("blue chen: chenminnj/oxy/roundrobin/rr.go: find backend server: %s  for client %s, ip is %s",r.servers[idx].url,req.RemoteAddr,ip)
 	return r.servers[idx], nil
 }
 
@@ -368,6 +377,6 @@ type balancerHandler interface {
 	ServerWeight(u *url.URL) (int, bool)
 	RemoveServer(u *url.URL) error
 	UpsertServer(u *url.URL, options ...ServerOption) error
-	NextServer(addr string) (*url.URL, error)
+	NextServer(req *http.Request) (*url.URL, error)
 	Next() http.Handler
 }
